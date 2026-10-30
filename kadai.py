@@ -1,92 +1,58 @@
-import csv
 import time
-from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-START_URL = "https://musashino-u.ac.jp"
-DOMAIN = urlparse(START_URL).netloc
-INTERVAL = 1.0
+base = 'https://www.musashino-u.ac.jp'
+start = base + '/'           
 
-sitemap_dict = {}
-visited_urls = set()
+to_visit = [start]
+seen = {start}
+sitemap = {}
 
+while len(to_visit) > 0:  
+    url = to_visit.pop(0)
+    print(url)
 
-def get_page_title_and_links(url):
+    time.sleep(1)                
+
     try:
-        time.sleep(INTERVAL)
+        res = requests.get(url, timeout=10)
+    except requests.RequestException:
+        continue
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
+    if 'text/html' not in res.headers.get('Content-Type', ''):
+        continue
 
-        response = requests.get(url, headers=headers, timeout=10)
+    html_soup = BeautifulSoup(res.content, 'html.parser')
 
-        if (
-            response.status_code != 200
-            or "text/html" not in response.headers.get("Content-Type", "")
-        ):
-            return None, []
+    if html_soup.title and html_soup.title.string:
+        sitemap[url] = html_soup.title.string.strip()
+    else:
+        sitemap[url] = ''
 
-        response.encoding = response.apparent_encoding
-        soup = BeautifulSoup(response.text, "html.parser")
+    for a in html_soup.find_all('a'):
+        href = a.get('href')
+        if href is None:
+            continue
+        href = href.split('#')[0]
 
-        title = soup.title.string.strip() if soup.title else "No Title"
-
-        links = []
-        for a_tag in soup.find_all("a", href=True):
-            href = a_tag["href"]
-            full_url = urljoin(url, href)
-            full_url = urlparse(full_url)._replace(fragment="").geturl()
-
-            if urlparse(full_url).netloc == DOMAIN and full_url not in visited_urls:
-                links.append(full_url)
-
-        return title, links
-
-    except Exception as e:
-        print(f"Error accessing {url}: {e}")
-        return None, []
-
-
-def crawl_sitemap(start_url):
-    queue = [start_url]
-
-    while queue:
-        current_url = queue.pop(0)
-
-        if current_url in visited_urls:
+        if href.startswith('/') and not href.startswith('//'):
+            full_url = base + href
+        elif href.startswith(base):
+            full_url = href
+        else:
             continue
 
-        print(f"Scanning: {current_url}")
-        visited_urls.add(current_url)
+        if full_url not in seen:
+            seen.add(full_url)
+            to_visit.append(full_url)
 
-        title, next_links = get_page_title_and_links(current_url)
+import csv
 
-        if title is not None:
-            sitemap_dict[current_url] = title
+with open('sitemap.csv', 'w', newline='', encoding='utf-8-sig') as f:
+    writer = csv.writer(f)
+    writer.writerow(['url', 'title'])    
+    for url, title in sitemap.items():
+        writer.writerow([url, title])
 
-            for link in next_links:
-                if link not in visited_urls and link not in queue:
-                    queue.append(link)
-
-
-def save_to_csv(data_dict, filename="sitemap.csv"):
-    try:
-        with open(
-            filename, mode="w", encoding="utf-8-sig", newline=""
-        ) as file:
-            writer = csv.writer(file)
-            writer.writerow(["URL", "Title"])
-            for url, title in data_dict.items():
-                writer.writerow([url, title])
-        print(f"\n[Success] CSVファイル '{filename}' を保存しました。")
-    except Exception as e:
-        print(f"Error saving CSV: {e}")
-
-
-if __name__ == "__main__":
-    print("=== 武蔵野大学サイトマップ抽出開始 ===")
-    crawl_sitemap(START_URL)
-    print(f"\n巡回完了。検出ページ数: {len(sitemap_dict)}")
-    save_to_csv(sitemap_dict, "sitemap.csv")
+print(f'{len(sitemap)}ページを sitemap.csv に保存しました')
